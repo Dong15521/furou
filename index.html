@@ -125,4 +125,361 @@
         .message { max-width: 75%; padding: 12px 16px; border-radius: 20px; font-size: 15px; line-height: 1.6; position: relative; animation: bubbleIn 0.3s cubic-bezier(0.1, 0.9, 0.2, 1); }
         @keyframes bubbleIn { from { opacity: 0; transform: translateY(10px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
 
-        .msg-bot { background-color: #ffffff; align-self: flex-start; border-bottom-left-radius: 5px; box-shadow: 0 2px 8px rgba(0,0,
+        .msg-bot { background-color: #ffffff; align-self: flex-start; border-bottom-left-radius: 5px; box-shadow: 0 2px 8px rgba(0,0,0,0.02); }
+        .msg-user { background: var(--user-bubble-bg); align-self: flex-end; border-bottom-right-radius: 5px; color: #1a2e1a; font-weight: 500;}
+
+        .input-area { position: absolute; bottom: 0; left: 0; right: 0; padding: 20px 30px; display: flex; gap: 12px; z-index: 90; }
+        .input-wrapper { flex: 1; }
+        input[type="text"] { width: 100%; padding: 14px 20px; border: 1px solid var(--border-color); border-radius: 30px; font-size: 15px; outline: none; background: rgba(255,255,255,0.8); transition: all 0.2s; box-sizing: border-box; }
+        input[type="text"]:focus { background: #ffffff; box-shadow: 0 0 0 3px rgba(129, 199, 132, 0.2); border-color: transparent; }
+        
+        button.send-btn { padding: 0 24px; height: 48px; background: var(--accent-gradient); color: #ffffff; border: none; border-radius: 24px; font-size: 15px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 10px rgba(129, 199, 132, 0.3); transition: opacity 0.2s; flex-shrink: 0;}
+        button.send-btn:hover { opacity: 0.85; }
+
+        /* --- 手机端适配 (抽屉式滑动) --- */
+        @media (max-width: 768px) {
+            .timeline-container { 
+                position: absolute; left: 0; top: 0; width: 280px; 
+                transform: translateX(0); box-shadow: 5px 0 20px rgba(0,0,0,0.1); 
+            }
+            .timeline-container.collapsed { width: 280px; transform: translateX(-100%); border: none; box-shadow: none; }
+            .mobile-close-btn { display: block; } /* 手机端显示关闭按钮 */
+            .timeline-header { min-width: auto; }
+            .chat-history { padding: 80px 15px 100px 15px; }
+            .input-area { padding: 15px; gap: 8px;}
+            button.send-btn { padding: 0 16px; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="timeline-container glass-effect" id="sidebar">
+        <div class="timeline-header">
+            <div class="timeline-title">今日活动轨迹</div>
+            <button class="mobile-close-btn" onclick="toggleSidebar()">✕</button>
+        </div>
+        <div class="timeline-content" id="timeline"></div>
+    </div>
+
+    <div class="chat-container">
+        <div class="chat-nav glass-effect">
+            <div class="nav-left">
+                <button class="menu-btn" id="menuBtn" onclick="toggleSidebar()">✕</button>
+                <div id="headerTitle" style="font-size: 15px; font-weight: 600;">每日记录</div>
+            </div>
+            <button class="history-btn" onclick="showHistory()">历史记录</button>
+        </div>
+
+        <div class="greeting-overlay" id="greetingOverlay">
+            <div class="greeting-content">
+                <div class="greeting-text">Hi，<span id="userName" contenteditable="true" spellcheck="false" title="点击修改你的称呼">小景</span>，<br>开启人生中新的一天吧。</div>
+                <button class="start-btn" onclick="enterChat()">开始</button>
+            </div>
+        </div>
+
+        <div class="chat-history" id="chatHistory"></div>
+
+        <div class="input-area glass-effect">
+            <div class="input-wrapper">
+                <input type="text" id="userInput" placeholder="发送指令或直接聊天..." autocomplete="off">
+            </div>
+            <button class="send-btn" onclick="sendMessage()">发送</button>
+        </div>
+    </div>
+
+    <script>
+        let tasks = []; 
+        let chatLog = []; // 存储对话记录
+        let currentActiveTaskName = null; 
+        let timerInterval;
+
+        window.onload = function() {
+            const savedName = localStorage.getItem('lifeAssistantName') || '小景';
+            document.getElementById('userName').innerText = savedName;
+
+            const todayStr = new Date().toLocaleDateString();
+            const savedData = JSON.parse(localStorage.getItem('lifeAssistantData')) || {};
+            const todayData = savedData[todayStr];
+            
+            if(todayData) {
+                // 兼容旧版本的数据结构转换
+                if(Array.isArray(todayData)) {
+                    tasks = todayData;
+                    chatLog = [];
+                } else {
+                    tasks = todayData.tasks || [];
+                    chatLog = todayData.chat || [];
+                }
+
+                if (tasks.length > 0 || chatLog.length > 0) {
+                    document.getElementById('greetingOverlay').style.display = 'none';
+                    document.getElementById('headerTitle').innerText = savedName + '的一天';
+                    
+                    // 恢复聊天记录
+                    chatLog.forEach(msg => renderMessageToDOM(msg.text, msg.sender));
+                    
+                    // 找出当前进行中的任务
+                    const activeTask = tasks.find(t => t.active);
+                    if(activeTask) {
+                        currentActiveTaskName = activeTask.name;
+                        startGlobalTimer();
+                    }
+                    renderTimeline();
+                }
+            }
+            updateSidebarBtn();
+        };
+
+        document.getElementById('userName').addEventListener('keypress', function(e) {
+            if(e.key === 'Enter') { e.preventDefault(); this.blur(); }
+        });
+
+        // 修改引导文案，增加细节说明
+        function enterChat() {
+            const nameEl = document.getElementById('userName');
+            let currentName = nameEl.innerText.trim() || '小景';
+            localStorage.setItem('lifeAssistantName', currentName);
+            
+            document.getElementById('headerTitle').innerText = currentName + '的一天';
+            document.getElementById('greetingOverlay').classList.add('melt-away');
+            
+            setTimeout(() => {
+                document.getElementById('greetingOverlay').style.display = 'none';
+                
+                const rulesHtml = `欢迎进入 <strong>${currentName}的一天</strong>！🌿<br><br>
+                为了让我更懂你，请参考以下操作：<br><br>
+                <span style="color:#66bb6a;">▶</span> <strong>开启事项：</strong> 包含“开始”二字（如“开始吃午饭”）<br>
+                <span style="color:#66bb6a;">▶</span> <strong>结束事项：</strong> 包含“结束/完成”（如“午饭结束”）<br>
+                <span style="color:#66bb6a;">▶</span> <strong>补充细节：</strong> 事项进行中，直接发送想记录的具体内容，会自动成为该事项的子项目。<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;<span style="font-size:13px;color:#8b998c;">💡 例如：在“吃午饭”进行时，发送“吃了汉堡”；在“健身”进行时，发送“练了背”。</span><br>
+                <span style="color:#66bb6a;">▶</span> <strong>结束一天：</strong> 发送“总结”<br><br>
+                准备好了吗？现在就发送你的第一个指令吧！`;
+                addMessageToChat(rulesHtml, 'bot');
+            }, 800);
+        }
+
+        // 侧边栏折叠逻辑
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            sidebar.classList.toggle('collapsed');
+            updateSidebarBtn();
+        }
+
+        // 自动展开侧边栏（动效弹出）
+        function openSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            if (sidebar.classList.contains('collapsed')) {
+                sidebar.classList.remove('collapsed');
+                updateSidebarBtn();
+            }
+        }
+
+        function updateSidebarBtn() {
+            const sidebar = document.getElementById('sidebar');
+            const menuBtn = document.getElementById('menuBtn');
+            menuBtn.innerText = sidebar.classList.contains('collapsed') ? '☰' : '✕';
+        }
+
+        function getTimeString() {
+            const now = new Date();
+            return now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+        }
+
+        // 存储结构升级，同时保存 task 和 chat
+        function saveToLocal() {
+            const todayStr = new Date().toLocaleDateString();
+            const savedData = JSON.parse(localStorage.getItem('lifeAssistantData')) || {};
+            savedData[todayStr] = { tasks: tasks, chat: chatLog };
+            localStorage.setItem('lifeAssistantData', JSON.stringify(savedData));
+        }
+
+        function sendMessage() {
+            const inputEl = document.getElementById('userInput');
+            const text = inputEl.value.trim();
+            if (!text) return;
+
+            addMessageToChat(text, 'user');
+            inputEl.value = '';
+
+            setTimeout(() => { processUserText(text); }, 400);
+        }
+
+        function processUserText(text) {
+            let botReply = "";
+            let handled = false;
+            let shouldPopSidebar = false; // 是否需要自动弹出侧边栏
+
+            if (text.includes("开始")) {
+                let taskName = text.replace(/我|已经|开始|了|吧|指令/g, '').trim();
+                if(text.indexOf("开始") > 0) taskName = text.substring(0, text.indexOf("开始")).trim();
+                
+                if(taskName) {
+                    startNewTask(taskName);
+                    botReply = `好的，已开始记录【${taskName}】。专注当下吧。`;
+                    currentActiveTaskName = taskName; 
+                    handled = true;
+                    shouldPopSidebar = true;
+                }
+            } 
+            else if (text.includes("完成") || text.includes("结束")) {
+                let taskName = text.replace(/我|已经|完成|结束|了/g, '').trim();
+                
+                if((taskName === "" || text === taskName) && currentActiveTaskName) {
+                    taskName = currentActiveTaskName;
+                } else if (taskName && currentActiveTaskName) {
+                    if(currentActiveTaskName.includes(taskName) || taskName.includes(currentActiveTaskName)) {
+                        taskName = currentActiveTaskName;
+                    }
+                }
+
+                if(taskName && isTaskItemActive(taskName)) {
+                    endTaskItem(taskName);
+                    botReply = `【${taskName}】已完成。做得好！`;
+                    if(taskName === currentActiveTaskName) currentActiveTaskName = null;
+                    handled = true;
+                    shouldPopSidebar = true;
+                }
+            }
+            else if (text.includes("总结")) {
+                tasks.forEach(t => {
+                    if(t.active) { t.active = false; t.duration = Math.floor((Date.now() - t.startTime) / 60000); }
+                });
+                currentActiveTaskName = null;
+
+                let summaryHtml = `<strong>📝 今日总结 (${new Date().toLocaleDateString()})</strong><br><br>`;
+                if(tasks.length === 0) {
+                    summaryHtml += "今天还没有记录任何事项哦。";
+                } else {
+                    tasks.forEach((t, index) => {
+                        summaryHtml += `<strong>${index+1}. ${t.name}</strong> <span style="font-size:12px;color:#8b998c;">(${t.timeStr} 开始，共 ${t.duration} 分钟)</span><br>`;
+                        if(t.subTasks && t.subTasks.length > 0) {
+                            t.subTasks.forEach(st => { summaryHtml += `&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#66bb6a;">-</span> ${st}<br>`; });
+                        }
+                    });
+                }
+                summaryHtml += "<br>每一天微小的积累，都会在未来闪闪发光。早点休息，明天见。";
+                botReply = summaryHtml;
+                handled = true;
+                shouldPopSidebar = true;
+            }
+
+            if (!handled && currentActiveTaskName) {
+                addSubTaskToActive(currentActiveTaskName, text);
+                botReply = `已在【${currentActiveTaskName}】下记录：${text}`;
+                handled = true;
+                shouldPopSidebar = true;
+            }
+
+            if (!handled) botReply = "收到。想让系统记录节点，别忘了带上“开始”或“结束”哦。";
+
+            addMessageToChat(botReply, 'bot');
+            renderTimeline();
+            
+            // 触发侧边栏弹出
+            if(shouldPopSidebar) {
+                openSidebar();
+            }
+        }
+
+        function showHistory() {
+            const savedData = JSON.parse(localStorage.getItem('lifeAssistantData')) || {};
+            const dates = Object.keys(savedData).filter(d => d !== new Date().toLocaleDateString());
+
+            if(dates.length === 0) { addMessageToChat("你目前还没有过去的历史总结记录哦。", 'bot'); return; }
+
+            let historyHtml = `<strong>📖 过去的日子</strong><br><br>`;
+            dates.forEach(date => {
+                const dayData = savedData[date];
+                // 兼容旧数据读取
+                const dayTasks = Array.isArray(dayData) ? dayData : (dayData.tasks || []);
+                
+                historyHtml += `<strong>${date}</strong>：记录了 ${dayTasks.length} 个事项<br>`;
+                dayTasks.forEach(t => { historyHtml += `<span style="font-size:13px;color:#8b998c;">&nbsp;&nbsp;· ${t.name} (${t.duration}分钟)</span><br>`; });
+                historyHtml += `<br>`;
+            });
+            historyHtml += `<span style="font-size:12px;color:#8b998c;">(历史数据安全保存在你当前的设备本地)</span>`;
+            addMessageToChat(historyHtml, 'bot');
+        }
+
+        function startNewTask(name) {
+            if(isTaskItemActive(name)) return;
+            tasks.push({ name: name, startTime: Date.now(), timeStr: getTimeString(), active: true, duration: 0, subTasks: [] });
+            startGlobalTimer();
+        }
+
+        function isTaskItemActive(name) { return tasks.some(t => t.name === name && t.active); }
+
+        function endTaskItem(name) {
+            const task = tasks.find(t => t.name === name && t.active);
+            if(task) { task.active = false; task.duration = Math.floor((Date.now() - task.startTime) / 60000); }
+        }
+
+        function addSubTaskToActive(mainTaskName, detailText) {
+            const task = tasks.find(t => t.name === mainTaskName && t.active);
+            if(task) task.subTasks.push(detailText);
+        }
+
+        function startGlobalTimer() {
+            if(!timerInterval) {
+                timerInterval = setInterval(() => {
+                    let hasActive = false;
+                    tasks.forEach(task => {
+                        if(task.active) { task.duration = Math.floor((Date.now() - task.startTime) / 60000); hasActive = true; }
+                    });
+                    renderTimeline();
+                    saveToLocal();
+                    if(!hasActive) { clearInterval(timerInterval); timerInterval = null; }
+                }, 60000);
+            }
+        }
+
+        // 保存并渲染对话
+        function addMessageToChat(text, sender) {
+            chatLog.push({ text: text, sender: sender });
+            renderMessageToDOM(text, sender);
+            saveToLocal(); // 每次对话都保存
+        }
+
+        // 仅负责将气泡画在屏幕上（刷新加载时调用）
+        function renderMessageToDOM(text, sender) {
+            const chatHistory = document.getElementById('chatHistory');
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message msg-${sender}`;
+            msgDiv.innerHTML = text;
+            chatHistory.appendChild(msgDiv);
+            setTimeout(() => { chatHistory.scrollTop = chatHistory.scrollHeight; }, 100);
+        }
+
+        function renderTimeline() {
+            const timeline = document.getElementById('timeline');
+            timeline.innerHTML = '';
+            [...tasks].reverse().forEach(task => {
+                const itemDiv = document.createElement('div');
+                itemDiv.className = `task-item ${task.active ? 'active' : ''}`;
+                let durationText = task.active ? `已进行 ${task.duration} 分钟...` : `共耗时 ${task.duration} 分钟`;
+                if(task.duration === 0) durationText = task.active ? "刚刚开始..." : "不到1分钟";
+
+                let subTaskHtml = '';
+                if(task.subTasks && task.subTasks.length > 0) {
+                    subTaskHtml = `<ul class="sub-task-list">`;
+                    task.subTasks.forEach(st => { subTaskHtml += `<li class="sub-task-item">${st}</li>`; });
+                    subTaskHtml += `</ul>`;
+                }
+
+                itemDiv.innerHTML = `<div class="task-time">${task.timeStr}</div><div class="task-name">${task.name}</div><div class="task-duration">${durationText}</div>${subTaskHtml}`;
+                timeline.appendChild(itemDiv);
+            });
+        }
+
+        document.getElementById('userInput').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        // 默认状态管理
+        if(window.innerWidth <= 768) {
+            document.getElementById('sidebar').classList.add('collapsed');
+            updateSidebarBtn();
+        }
+    </script>
+</body>
+</html>
