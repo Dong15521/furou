@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>极简生活助理</title>
+    <style>
+        /* Apple / 无印良品风极简设计 */
+        :root {
+            --bg-color: #f5f5f7;
+            --text-main: #1d1d1f;
+            --text-light: #86868b;
+            --border-color: #d2d2d7;
+            --chat-user: #e3e3e8;
+            --chat-bot: #ffffff;
+            --accent: #007aff;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* 左侧时间轴 */
+        .timeline-container {
+            width: 35%;
+            background-color: #ffffff;
+            border-right: 1px solid var(--border-color);
+            padding: 20px;
+            overflow-y: auto;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.03);
+            z-index: 10;
+        }
+
+        .timeline-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-light);
+            margin-bottom: 20px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .task-item {
+            margin-bottom: 15px;
+            padding-left: 15px;
+            border-left: 2px solid var(--border-color);
+            position: relative;
+        }
+
+        .task-item::before {
+            content: '';
+            position: absolute;
+            left: -5px;
+            top: 5px;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: var(--text-light);
+        }
+
+        .task-item.active::before {
+            background-color: var(--accent);
+            box-shadow: 0 0 5px var(--accent);
+        }
+
+        .task-item.active { border-left-color: var(--accent); }
+        .task-time { font-size: 12px; color: var(--text-light); margin-bottom: 4px; }
+        .task-name { font-size: 15px; font-weight: 500; }
+        .task-duration { font-size: 12px; color: var(--accent); margin-top: 4px; }
+
+        /* 右侧对话框 */
+        .chat-container {
+            width: 65%;
+            display: flex;
+            flex-direction: column;
+            background-color: var(--bg-color);
+        }
+
+        .chat-history {
+            flex: 1;
+            padding: 30px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .message {
+            max-width: 70%;
+            padding: 12px 18px;
+            border-radius: 18px;
+            font-size: 15px;
+            line-height: 1.5;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        .msg-bot {
+            background-color: var(--chat-bot);
+            align-self: flex-start;
+            border-bottom-left-radius: 4px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        }
+
+        .msg-user {
+            background-color: var(--chat-user);
+            align-self: flex-end;
+            border-bottom-right-radius: 4px;
+        }
+
+        .input-area {
+            padding: 20px 30px;
+            background-color: #ffffff;
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            gap: 15px;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            padding: 12px 20px;
+            border: 1px solid var(--border-color);
+            border-radius: 24px;
+            font-size: 15px;
+            outline: none;
+            transition: border-color 0.2s;
+            background-color: var(--bg-color);
+        }
+
+        input[type="text"]:focus { border-color: var(--text-light); background-color: #ffffff; }
+
+        button {
+            padding: 0 24px;
+            background-color: var(--text-main);
+            color: #ffffff;
+            border: none;
+            border-radius: 24px;
+            font-size: 15px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        button:hover { opacity: 0.8; }
+    </style>
+</head>
+<body>
+
+    <div class="timeline-container">
+        <div class="timeline-title">今日活动轨迹</div>
+        <div id="timeline">
+            </div>
+    </div>
+
+    <div class="chat-container">
+        <div class="chat-history" id="chatHistory">
+            <div class="message msg-bot">Hi, 朋友，一起开启人生中新的一天吧。今天有什么计划？<br><br><span style="font-size:12px; color:#86868b;">(提示：输入“开始洗漱”启动计时，输入“洗漱完成”结束计时，输入“总结”结束一天)</span></div>
+        </div>
+        <div class="input-area">
+            <input type="text" id="userInput" placeholder="例如：我开始看书了..." autocomplete="off">
+            <button onclick="sendMessage()">发送</button>
+        </div>
+    </div>
+
+    <script>
+        let tasks = {}; // 存储当前进行的任务
+        let timerInterval;
+
+        // 获取当前时间戳 HH:MM
+        function getTimeString() {
+            const now = new Date();
+            return now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+        }
+
+        // 处理发送消息
+        function sendMessage() {
+            const inputEl = document.getElementById('userInput');
+            const text = inputEl.value.trim();
+            if (!text) return;
+
+            // 1. 显示用户消息
+            addMessage(text, 'user');
+            inputEl.value = '';
+
+            // 2. 简易的关键词逻辑识别 (模拟AI)
+            setTimeout(() => {
+                processLogic(text);
+            }, 500);
+        }
+
+        // 核心逻辑：解析文字并操作时间轴
+        function processLogic(text) {
+            let botReply = "收到，我已经记录下来了。继续保持专注！";
+            
+            // 匹配 "开始 XXX"
+            if (text.includes("开始")) {
+                let taskName = text.split("开始")[1].replace(/了|吧/g, '').trim();
+                if(taskName) {
+                    startTask(taskName);
+                    botReply = `好的，开始【${taskName}】。不要着急，按自己的节奏来就好。`;
+                }
+            } 
+            // 匹配 "XXX 完成" 或 "结束 XXX"
+            else if (text.includes("完成") || text.includes("结束")) {
+                let taskName = text.replace(/我|已经|完成|结束|了/g, '').trim();
+                if(tasks[taskName]) {
+                    endTask(taskName);
+                    botReply = `太棒了！【${taskName}】顺利完成。稍作休息，喝口水吧。`;
+                } else {
+                    // 如果没精确匹配到，结束最近的一个任务
+                    let activeKeys = Object.keys(tasks);
+                    if(activeKeys.length > 0) {
+                        let lastTask = activeKeys[activeKeys.length - 1];
+                        endTask(lastTask);
+                        botReply = `【${lastTask}】结束啦！做得很棒，接下来有什么打算？`;
+                    } else {
+                        botReply = "目前好像没有正在计时的活动哦。";
+                    }
+                }
+            }
+            // 匹配 "总结"
+            else if (text.includes("总结")) {
+                botReply = "今天辛苦啦！你完成得非常出色，每一天微小的积累，都会在未来闪闪发光。好好休息，明天见。";
+                // 停止所有任务
+                Object.keys(tasks).forEach(k => endTask(k));
+            }
+
+            addMessage(botReply, 'bot');
+            renderTimeline();
+        }
+
+        function startTask(name) {
+            tasks[name] = {
+                startTime: Date.now(),
+                timeStr: getTimeString(),
+                active: true,
+                duration: 0
+            };
+            if(!timerInterval) timerInterval = setInterval(updateTimers, 60000); // 每分钟更新一次
+        }
+
+        function endTask(name) {
+            if(tasks[name]) {
+                tasks[name].active = false;
+                tasks[name].duration = Math.floor((Date.now() - tasks[name].startTime) / 60000);
+            }
+        }
+
+        function updateTimers() {
+            let hasActive = false;
+            for(let key in tasks) {
+                if(tasks[key].active) {
+                    tasks[key].duration = Math.floor((Date.now() - tasks[key].startTime) / 60000);
+                    hasActive = true;
+                }
+            }
+            renderTimeline();
+            if(!hasActive) clearInterval(timerInterval);
+        }
+
+        // 渲染对话
+        function addMessage(text, sender) {
+            const chatHistory = document.getElementById('chatHistory');
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message msg-${sender}`;
+            msgDiv.innerHTML = text;
+            chatHistory.appendChild(msgDiv);
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+        }
+
+        // 渲染时间轴
+        function renderTimeline() {
+            const timeline = document.getElementById('timeline');
+            timeline.innerHTML = '';
+            for(let key in tasks) {
+                const task = tasks[key];
+                const itemDiv = document.createElement('div');
+                itemDiv.className = `task-item ${task.active ? 'active' : ''}`;
+                
+                let durationText = task.active ? `已进行 ${task.duration} 分钟...` : `共耗时 ${task.duration} 分钟`;
+                if(task.duration === 0) durationText = task.active ? "刚刚开始..." : "不到1分钟";
+
+                itemDiv.innerHTML = `
+                    <div class="task-time">${task.timeStr}</div>
+                    <div class="task-name">${key}</div>
+                    <div class="task-duration">${durationText}</div>
+                `;
+                timeline.appendChild(itemDiv);
+            }
+        }
+
+        // 监听回车键发送
+        document.getElementById('userInput').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') sendMessage();
+        });
+    </script>
+</body>
+</html>
